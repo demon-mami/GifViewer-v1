@@ -1,0 +1,14 @@
+{
+  "name": "GifViewer-v1",
+  "version": "2.0.0",
+  "pets": 55,
+  "actionsPerPet": 9,
+  "catalogNavigation": "iOS/e-book swipe: right-to-left next, left-to-right previous",
+  "characterSelection": "heart",
+  "motionSelection": "star per action",
+  "reviewHeartMode": "pet list -> selected pet -> 9 normal-speed animations",
+  "reviewStarMode": "all starred motions use one normalized synchronized frame axis",
+  "spriteSource": "https://codex-pets.net/assets/pets/<id>/spritesheet.webp",
+  "storage": "localStorage codexPetSelector.v1",
+  "export": "codex_pet_selection.json"
+}
