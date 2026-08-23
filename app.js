@@ -10,6 +10,7 @@
   let view = {name:'home', index:0, filter:'all', fromConfirm:false};
   let animator = null;
   let viewCleanup = null;
+  let confirmSnapshot = null;
   const imageCache = new Map();
   const IMAGE_CACHE_LIMIT = 5;
 
@@ -68,6 +69,40 @@
     if(viewCleanup){ viewCleanup(); viewCleanup = null; }
   }
 
+  function captureConfirmSnapshot(){
+    const snapshot = {all:new Set(), hearts:new Set(), stars:new Map()};
+    pets.forEach((p,i) => {
+      const s = pstate(p.id);
+      const keys = p.actions.filter(a => !!s.stars[a.key]).map(a => a.key);
+      if(s.heart || keys.length) snapshot.all.add(i);
+      if(s.heart) snapshot.hearts.add(i);
+      if(keys.length) snapshot.stars.set(i, new Set(keys));
+    });
+    confirmSnapshot = snapshot;
+    return snapshot;
+  }
+  function ensureConfirmSnapshot(){ return confirmSnapshot || captureConfirmSnapshot(); }
+  function rememberHeart(index){
+    if(!confirmSnapshot) return;
+    confirmSnapshot.all.add(index);
+    confirmSnapshot.hearts.add(index);
+  }
+  function rememberStar(index,key){
+    if(!confirmSnapshot) return;
+    confirmSnapshot.all.add(index);
+    if(!confirmSnapshot.stars.has(index)) confirmSnapshot.stars.set(index,new Set());
+    confirmSnapshot.stars.get(index).add(key);
+  }
+  function snapshotStarKeys(index){
+    const snap = ensureConfirmSnapshot();
+    return snap.stars.get(index) || new Set();
+  }
+  function openConfirm(filter='all'){
+    captureConfirmSnapshot();
+    view = {name:'confirm',index:0,filter,fromConfirm:false};
+    render();
+  }
+
   function render(){
     cleanupView();
     if(view.name === 'home') renderHome();
@@ -78,27 +113,30 @@
   }
 
   function renderHome(){
+    confirmSnapshot = null;
     window.scrollTo(0,0);
     const rc = reviewedCount();
     const canContinue = rc > 0 || state.lastIndex > 0;
     const canConfirm = selectedCount() > 0;
     app.innerHTML = `<section class="cover-screen">
       <div class="cover-book">
-        <div class="cover-kicker">PET CATALOG</div>
-        <div class="cover-number">55</div>
+        <div class="cover-kicker">GIF Asset</div>
+        <div class="cover-image-slot" aria-label="イラスト配置予定スペース"><span>No Image</span></div>
         <div class="cover-rule"></div>
         <div class="cover-actions">
           <button class="cover-btn primary" id="startBtn">はじめから</button>
-          <button class="cover-btn" id="continueBtn" ${canContinue?'':'disabled'}>つづきから</button>
+          <div class="continue-wrap">
+            <button class="cover-btn" id="continueBtn" ${canContinue?'':'disabled'}>つづきから</button>
+            <span class="continue-progress">${rc} / ${pets.length}</span>
+          </div>
           <button class="cover-btn" id="confirmBtn" ${canConfirm?'':'disabled'}>かくにん</button>
         </div>
-        <div class="cover-progress">${rc} / ${pets.length}</div>
       </div>
     </section>`;
 
     $('#startBtn').onclick = () => { view = {name:'catalog',index:0,filter:'all',fromConfirm:false}; render(); };
     $('#continueBtn').onclick = () => { view = {name:'catalog',index:firstUnreviewed(),filter:'all',fromConfirm:false}; render(); };
-    $('#confirmBtn').onclick = () => { view = {name:'confirm',index:0,filter:'all',fromConfirm:false}; render(); };
+    $('#confirmBtn').onclick = () => openConfirm('all');
   }
 
   function renderCatalog(){
@@ -109,12 +147,14 @@
     </section>`;
 
     $$('.heart-toggle').forEach(btn => btn.onclick = () => {
-      const s = pstate(pets[Number(btn.dataset.petIndex)].id);
-      toggleHeart(btn, s);
+      const pi = Number(btn.dataset.petIndex);
+      const s = pstate(pets[pi].id);
+      toggleHeart(btn, s, pi);
     });
     $$('.star-btn[data-action]').forEach(btn => btn.onclick = () => {
-      const s = pstate(pets[Number(btn.dataset.petIndex)].id);
-      toggleStar(btn, s);
+      const pi = Number(btn.dataset.petIndex);
+      const s = pstate(pets[pi].id);
+      toggleStar(btn, s, pi);
     });
     $$('.home-icon').forEach(btn => btn.onclick = () => {
       if(single){
@@ -230,28 +270,37 @@
     </div>`;
   }
 
-  function toggleStar(btn, s){
+  function toggleStar(btn, s, petIndex){
     const key = btn.dataset.action;
     s.stars[key] = !s.stars[key];
+    if(s.stars[key]) rememberStar(petIndex,key);
     save();
-    btn.classList.toggle('on', !!s.stars[key]);
-    btn.textContent = s.stars[key] ? '★' : '☆';
-    btn.setAttribute('aria-pressed', s.stars[key] ? 'true' : 'false');
+    if(btn.classList.contains('review-star-toggle')) refreshMirroredStarButtons(petIndex,key,!!s.stars[key]);
+    else updateStarButton(btn, !!s.stars[key]);
+  }
+  function updateStarButton(btn,on){
+    btn.classList.toggle('on', on);
+    btn.textContent = on ? '★' : '☆';
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     btn.classList.remove('star-pop');
     void btn.offsetWidth;
     btn.classList.add('star-pop');
     setTimeout(() => btn.classList.remove('star-pop'), 250);
   }
 
-  function toggleHeart(btn, s){
+  function toggleHeart(btn, s, petIndex){
     s.heart = !s.heart;
+    if(s.heart) rememberHeart(petIndex);
     save();
-    btn.classList.toggle('on', s.heart);
-    btn.setAttribute('aria-pressed', s.heart ? 'true' : 'false');
-    btn.innerHTML = heartIcon(s.heart);
+    updateHeartButton(btn,s.heart);
+  }
+  function updateHeartButton(btn,on){
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.innerHTML = heartIcon(on);
     btn.classList.remove('heart-pop-on','heart-pop-off');
     void btn.offsetWidth;
-    btn.classList.add(s.heart ? 'heart-pop-on' : 'heart-pop-off');
+    btn.classList.add(on ? 'heart-pop-on' : 'heart-pop-off');
     setTimeout(() => btn.classList.remove('heart-pop-on','heart-pop-off'), 400);
   }
 
@@ -330,9 +379,13 @@
 
   function renderConfirm(){
     window.scrollTo(0,0);
-    let selected = pets.filter(isSelected);
-    if(view.filter === 'heart') selected = selected.filter(p => pstate(p.id).heart);
-    if(view.filter === 'star') selected = selected.filter(p => starCount(p) > 0);
+    const snap = ensureConfirmSnapshot();
+    let indices;
+    if(view.filter === 'heart') indices = [...snap.hearts];
+    else if(view.filter === 'star') indices = [...snap.stars.keys()];
+    else indices = [...snap.all];
+    indices.sort((a,b) => a-b);
+    const selected = indices.map(i => pets[i]).filter(Boolean);
     const starMode = view.filter === 'star';
 
     app.innerHTML = `<section class="review-screen">
@@ -355,43 +408,91 @@
       <button class="export-btn" id="exportBtn">結果を書き出す</button>
     </section>`;
 
-    $('#homeBtn').onclick = () => { view = {name:'home',index:0,filter:'all',fromConfirm:false}; render(); };
+    $('#homeBtn').onclick = () => {
+      confirmSnapshot = null;
+      view = {name:'home',index:0,filter:'all',fromConfirm:false};
+      render();
+    };
     $$('.filter-btn').forEach(b => b.onclick = () => { view.filter = b.dataset.filter; render(); });
-    $$('.confirm-card, .sync-pet-card').forEach(el => el.onclick = (e) => {
+    $$('.confirm-open').forEach(el => el.onclick = () => {
+      view = {name:'detail',index:Number(el.dataset.index),filter:view.filter,fromConfirm:false};
+      render();
+    });
+    $$('.sync-pet-card').forEach(el => el.onclick = (e) => {
       if(e.target.closest('button')) return;
       view = {name:'detail',index:Number(el.dataset.index),filter:view.filter,fromConfirm:false};
       render();
+    });
+    $$('.review-heart-toggle').forEach(btn => btn.onclick = (e) => {
+      e.stopPropagation();
+      const pi = Number(btn.dataset.petIndex);
+      toggleHeart(btn,pstate(pets[pi].id),pi);
+    });
+    $$('.review-star-toggle').forEach(btn => btn.onclick = (e) => {
+      e.stopPropagation();
+      const pi = Number(btn.dataset.petIndex);
+      const s = pstate(pets[pi].id);
+      toggleStar(btn,s,pi);
     });
     $('#exportBtn').onclick = exportResults;
     if(starMode && selected.length) initSynchronizedStarAnimations();
   }
 
   function confirmCard(p){
-    const s = pstate(p.id), sc = starCount(p), num = catalogNo(p.index);
-    return `<button class="confirm-card" data-index="${p.index}">
-      <div class="thumb-wrap"><img class="thumb-sheet" loading="lazy" decoding="async" src="${esc(sheetUrl(p))}" alt=""></div>
-      <div class="confirm-meta">
-        <div class="confirm-name">${num}. ${esc(p.displayName)}</div>
-        <div class="confirm-flags">${s.heart?'<span class="flag-heart">♥</span>':''}${sc?`<span class="flag-star">★ ${sc}</span>`:''}</div>
+    const s = pstate(p.id), num = catalogNo(p.index);
+    const snapKeys = snapshotStarKeys(p.index);
+    const orderedKeys = p.actions.filter(a => snapKeys.has(a.key));
+    return `<article class="confirm-card" data-index="${p.index}">
+      <button class="confirm-open" data-index="${p.index}" aria-label="${num}. ${esc(p.displayName)}を開く">
+        <div class="thumb-wrap"><img class="thumb-sheet" loading="lazy" decoding="async" src="${esc(sheetUrl(p))}" alt=""></div>
+        <div class="confirm-meta">
+          <div class="confirm-name">${num}. ${esc(p.displayName)}</div>
+        </div>
+      </button>
+      <div class="confirm-selectors">
+        <button class="review-heart-toggle ${s.heart?'on':''}" data-pet-index="${p.index}" aria-label="キャラクター構造を採用" aria-pressed="${s.heart?'true':'false'}">${heartIcon(s.heart)}</button>
+        <div class="review-star-chips">
+          ${orderedKeys.map(a => `<button class="review-star-toggle ${s.stars[a.key]?'on':''}" data-pet-index="${p.index}" data-action="${esc(a.key)}" aria-pressed="${s.stars[a.key]?'true':'false'}"><span>${s.stars[a.key]?'★':'☆'}</span>${esc(a.label)}</button>`).join('')}
+        </div>
       </div>
-    </button>`;
+    </article>`;
   }
 
   function syncPetCard(p){
     const s = pstate(p.id), num = catalogNo(p.index);
-    const starred = p.actions.map((a,i) => ({a,i})).filter(x => !!s.stars[x.a.key]);
+    const snapKeys = snapshotStarKeys(p.index);
+    const starred = p.actions.map((a,i) => ({a,i})).filter(x => snapKeys.has(x.a.key));
     return `<article class="sync-pet-card" data-index="${p.index}">
       <div class="sync-pet-head">
         <div class="sync-pet-name">${num}. ${esc(p.displayName)}</div>
-        <div class="sync-count">★ ${starred.length}</div>
+        <button class="review-heart-toggle sync-heart ${s.heart?'on':''}" data-pet-index="${p.index}" aria-label="キャラクター構造を採用" aria-pressed="${s.heart?'true':'false'}">${heartIcon(s.heart)}</button>
       </div>
       <div class="sync-action-grid">
         ${starred.map(({a,i}) => `<div class="sync-action">
           <div class="sync-canvas-wrap"><canvas width="192" height="208" data-sync-pet="${p.index}" data-sync-action="${i}"></canvas></div>
+          <button class="review-star-toggle sync-star-toggle ${s.stars[a.key]?'on':''}" data-pet-index="${p.index}" data-action="${esc(a.key)}" aria-pressed="${s.stars[a.key]?'true':'false'}">${s.stars[a.key]?'★':'☆'}</button>
           <div class="sync-label">${esc(a.label)}</div>
         </div>`).join('')}
       </div>
     </article>`;
+  }
+
+  function refreshMirroredStarButtons(petIndex,key,on){
+    $$('.review-star-toggle').filter(btn =>
+      Number(btn.dataset.petIndex) === petIndex && btn.dataset.action === key
+    ).forEach(btn => {
+      btn.classList.toggle('on',on);
+      if(btn.classList.contains('sync-star-toggle')) btn.textContent = on ? '★' : '☆';
+      else {
+        const span = btn.querySelector('span');
+        if(span) span.textContent = on ? '★' : '☆';
+      }
+      btn.setAttribute('aria-pressed',on?'true':'false');
+      btn.classList.remove('star-pop');
+      void btn.offsetWidth;
+      btn.classList.add('star-pop');
+      setTimeout(() => btn.classList.remove('star-pop'),250);
+    });
   }
 
   function initSynchronizedStarAnimations(){
@@ -466,7 +567,7 @@
     window.scrollTo(0,0);
     app.innerHTML = `<section class="cover-screen">
       <div class="cover-book complete-book">
-        <div class="cover-kicker">PET CATALOG</div>
+        <div class="cover-kicker">GIF Asset</div>
         <div class="complete-number">55 / 55</div>
         <div class="complete-copy">すべて確認しました</div>
         <div class="cover-actions">
@@ -475,7 +576,7 @@
         </div>
       </div>
     </section>`;
-    $('#confirmBtn').onclick = () => { view = {name:'confirm',index:0,filter:'all',fromConfirm:false}; render(); };
+    $('#confirmBtn').onclick = () => openConfirm('all');
     $('#homeBtn').onclick = () => { view = {name:'home',index:0,filter:'all',fromConfirm:false}; render(); };
   }
 
